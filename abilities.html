@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Modular Ability Side-Scroller (Starter)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        html,
+        body {
+            margin: 0;
+            height: 100%;
+            background: #0f1116;
+            color: #e7e9ee;
+            font: 14px/1.3 system-ui, sans-serif;
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 80vh;
+            image-rendering: pixelated;
+            background: #12141b;
+        }
+
+        .hud {
+            position: fixed;
+            left: 10px;
+            top: 10px;
+            background: rgba(0, 0, 0, .4);
+            padding: 10px;
+            border-radius: 10px;
+            backdrop-filter: blur(3px);
+        }
+
+        .hud h3 {
+            margin: 0 0 6px 0;
+            font-size: 13px;
+            opacity: .9;
+        }
+
+        .hud .stat {
+            opacity: .9;
+        }
+
+        .chips {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+            max-width: min(520px, 92vw);
+        }
+
+        .chip {
+            border: 1px solid rgba(255, 255, 255, .15);
+            border-radius: 999px;
+            padding: 4px 8px;
+            cursor: pointer;
+            user-select: none;
+            transition: background .12s, border-color .12s;
+        }
+
+        .chip.active {
+            background: #273043;
+            border-color: #8fb3ff;
+        }
+
+        .hint {
+            position: fixed;
+            left: 12px;
+            bottom: 12px;
+            opacity: .8;
+        }
+
+        .limit {
+            margin-top: 6px;
+            opacity: .9;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="hud">
+        <h3>Equipped parts (toggle):</h3>
+        <div class="chips" id="chips"></div>
+        <div class="limit" id="limit"></div>
+        <div class="stat" id="statline"></div>
+    </div>
+    <div class="hint">←/A and →/D to move • Space/W/↑ to jump • S/↓ to crouch (if unlocked)</div>
+    <canvas id="game"></canvas>
+
+    <script>
+        /* ============================================================
+           CANVAS
+        ============================================================ */
+        const cvs = document.getElementById('game');
+        const ctx = cvs.getContext('2d');
+        const VIEW_W = 960, VIEW_H = 540;
+
+        function resize() {
+            const dpr = devicePixelRatio || 1;
+            cvs.width = Math.floor(VIEW_W * dpr);
+            cvs.height = Math.floor(VIEW_H * dpr);
+            cvs.style.width = VIEW_W + 'px';
+            cvs.style.height = VIEW_H + 'px';
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+        resize(); addEventListener('resize', resize);
+
+        /* ============================================================
+           INPUT
+        ============================================================ */
+        const keys = new Set();
+        addEventListener('keydown', e => { if (!e.repeat) keys.add(e.code); });
+        addEventListener('keyup', e => keys.delete(e.code));
+        addEventListener('keydown', e => {
+            if ((e.code === 'Space' || e.code === 'ArrowUp') && e.target === document.body) e.preventDefault();
+        });
+        const input = {
+            left: () => keys.has('ArrowLeft') || keys.has('KeyA'),
+            right: () => keys.has('ArrowRight') || keys.has('KeyD'),
+            up: () => keys.has('ArrowUp') || keys.has('KeyW') || keys.has('Space'),
+            down: () => keys.has('ArrowDown') || keys.has('KeyS')
+        };
+
+        /* ============================================================
+           WORLD
+        ============================================================ */
+        const world = {
+            gravity: 2000,
+            groundY: 420,
+            width: 6000,
+            cameraX: 0,
+            bg: '#151823',
+            ground: '#2a2f3a'
+        };
+
+        /* ============================================================
+           PLAYER CORE (physics only). Behavior comes from stats+controllers.
+        ============================================================ */
+        const BASE_STATS = Object.freeze({
+            moveSpeed: 380,          // px/s
+            airControl: 0.05,        // 0..1 drag factor per frame
+            friction: 1200,          // px/s^2 when grounded and no input
+            jumpPower: 720,          // jump impulse
+            jumpCount: 0,            // how many consecutive jumps allowed (0 means can't jump)
+            canCrouch: false,
+            crouchSpeedScale: 0.5,   // movement speed multiplier while crouched
+            height: 64,              // standing height
+            crouchHeight: 40,        // crouched height
+            canLedgeGrab: false      // example boolean (controller hook below)
+        });
+
+        const player = {
+            x: 120, y: world.groundY - BASE_STATS.height,
+            w: 40, h: BASE_STATS.height,
+            vx: 0, vy: 0,
+            facing: 1,
+            onGround: true,
+            crouched: false,
+            jumpsLeft: 0, // set by controllers when grounded/spawn
+        };
+
+        /* ============================
+            LEVEL / OBSTACLES
+        ============================ */
+        const level = {
+            pits: [],        // {x,w}
+            ceilings: [],    // {x,y,w,h}
+            walls: [],       // {x,y,w,h} (solid)
+            platforms: []    // {x,y,w,h} (one-way from above)
+        };
+
+        // AABB helper
+        function aabb(r1, r2) {
+            return !(r1.x + r1.w <= r2.x || r1.x >= r2.x + r2.w ||
+                r1.y + r1.h <= r2.y || r1.y >= r2.y + r2.h);
+        }
+
+        // Ground sampler: returns the y of “ground” at a given x,
+        // accounting for pits (no ground where a pit exists).
+        function groundAt(xCenter) {
+            for (const p of level.pits) {
+                if (xCenter >= p.x && xCenter <= p.x + p.w) return Infinity; // no ground (pit)
+            }
+            return world.groundY;
+        }
+
+        // Check if standing up would hit a ceiling (blocks uncrouch)
+        function wouldHitCeiling(newH) {
+            const rect = { x: player.x, y: player.y + player.h - newH, w: player.w, h: newH };
+            return level.ceilings.some(c => aabb(rect, c));
+        }
+
+        // Build a small “cave” that tests crouch → jump → ledge
+        function buildCaveLevel(startX = 220) {
+            level.pits.push({ x: startX + 280, w: 160 });             // first gap (simple jump)
+            level.ceilings.push({ x: startX + 520, y: world.groundY - 50, w: 420, h: 20 }); // low tunnel: 50px clearance
+            level.pits.push({ x: startX + 1100, w: 220 });            // bigger gap
+            level.platforms.push({ x: startX + 1100 + 140, y: world.groundY - 120, w: 160, h: 14 }); // landing ledge
+            level.walls.push({ x: startX + 1600, y: world.groundY - 160, w: 16, h: 160 }); // vertical wall
+            level.platforms.push({ x: startX + 1620, y: world.groundY - 200, w: 140, h: 14 }); // tiny ledge after wall
+            level.platforms.push({ x: startX + 1900, y: world.groundY - 260, w: 240, h: 14 }); // exit shelf
+            world.width = Math.max(world.width, startX + 2300);
+        }
+        buildCaveLevel(); // call once on load
+
+
+        /* ============================================================
+           ABILITY SYSTEM (data-driven)
+           - Items declare statMods and optional controller()
+           - You can equip up to EQUIP_LIMIT at once
+        ============================================================ */
+        const EQUIP_LIMIT_DEFAULT = 3; // change per level to tune difficulty
+        let EQUIP_LIMIT = EQUIP_LIMIT_DEFAULT;
+
+        const Mod = {
+            // Stat mod helpers (composable)
+            add: (k, v) => ({ type: 'add', key: k, value: v }),
+            mul: (k, v) => ({ type: 'mul', key: k, value: v }),
+            set: (k, v) => ({ type: 'set', key: k, value: v }),
+            flag: (k, v = true) => ({ type: 'set', key: k, value: v })
+        };
+
+        // -----------------------------
+        // Item Registry
+        // -----------------------------
+        // Each item: { id, name, statMods: Mod[], controller?: (state,input,stats,dt,world)=>void }
+        const ITEMS = [
+            {
+                id: 'jump_boots',
+                name: 'Jump Boots',
+                statMods: [
+                    Mod.flag('hasBoots', true),
+                    Mod.set('jumpBase', 1)   // ← provide base jump stock
+                ],
+                controller(state, input, stats) {
+                    if (!pressedUp()) return;
+                    const available = state.onGround ? stats.jumpCount : (state.jumpsLeft ?? 0);
+                    if (available > 0) {
+                        state.vy = -stats.jumpPower;
+                        state.jumpsLeft = (state.onGround ? stats.jumpCount : state.jumpsLeft) - 1;
+                        state.onGround = false;
+                    }
+                }
+            },
+            {
+                id: 'double_jump_chip',
+                name: 'Double Jump Chip',
+                requires: ['jump_boots'],     // ← MUST have boots
+                statMods: [
+                    Mod.add('jumpBonus', 1)     // ← add one extra jump, no set()
+                ]
+            },
+            {
+                id: 'spring_legs',
+                name: 'Spring Legs (+Jump Power)',
+                statMods: [
+                    Mod.add('jumpPower', 200)
+                ]
+            },
+            {
+                id: 'crawler_spine',
+                name: 'Crawler Spine (Crouch)',
+                statMods: [
+                    Mod.flag('canCrouch', true),
+                    Mod.set('crouchSpeedScale', 0.45),
+                    Mod.set('crouchHeight', 38)
+                ],
+                controller(state, input, stats) {
+                    if (!stats.canCrouch) return;
+                    const wantCrouch = input.down() && state.onGround;
+                    if (wantCrouch && !state.crouched) {
+                        // enter crouch (keep feet anchored)
+                        const dh = state.h - stats.crouchHeight;
+                        state.y += dh; state.h = stats.crouchHeight; state.crouched = true;
+                    } else if (!wantCrouch && state.crouched) {
+                        // only stand if head won’t collide with a ceiling
+                        if (!wouldHitCeiling(stats.height)) {
+                            const dh = stats.height - state.h;
+                            state.y -= dh; state.h = stats.height; state.crouched = false;
+                        }
+                    }
+                }
+            },
+            {
+                id: 'ledge_glove',
+                name: 'Ledge Glove (proto)',
+                statMods: [
+                    Mod.flag('canLedgeGrab', true)
+                ],
+                controller(state, input, stats, dt, world) {
+                    // Minimal placeholder: if falling along a wall edge, "stick" briefly
+                    // (Real ledge grab needs tile/collision map; this shows how a behavior can live in an item)
+                    if (!stats.canLedgeGrab || state.onGround || state.vy <= 0) return;
+                    // Fake walls at x=800 and x=1600 for demo
+                    const nearWall = Math.abs(state.x - 800) < 6 || Math.abs(state.x - 1600) < 6;
+                    if (nearWall && input.up()) {
+                        state.vy = Math.min(state.vy, 60); // damp fall
+                    }
+                }
+            }
+        ];
+
+        // Utility: quick lookup
+        const ITEM_BY_ID = Object.fromEntries(ITEMS.map(i => [i.id, i]));
+
+        // -----------------------------
+        // Equip state + helpers
+        // -----------------------------
+        const equipped = new Set(); // store item ids
+
+        function equip(id) {
+            if (equipped.has(id)) return;
+            if (equipped.size >= EQUIP_LIMIT) return;
+            equipped.add(id);
+            if (player.onGround) {
+                const stats = computeStats();
+                player.jumpsLeft = stats.jumpCount;
+            }
+        }
+
+        function unequip(id) {
+            if (!equipped.has(id)) return;
+            equipped.delete(id);
+            if (player.onGround) {
+                const stats = computeStats();
+                player.jumpsLeft = stats.jumpCount;
+            }
+        }
+
+
+
+        function toggleEquip(id) {
+            if (equipped.has(id)) unequip(id); else equip(id);
+        }
+
+        const maxCam = Math.max(0, world.width - VIEW_W);
+        world.cameraX = Math.max(0, Math.min(maxCam, player.x + player.w / 2 - VIEW_W / 2));
+
+        const drawRects = (arr, style) => { ctx.fillStyle = style; for (const r of arr) ctx.fillRect(r.x, r.y, r.w, r.h); };
+
+
+        // -----------------------------
+        // Stat resolution pipeline
+        // -----------------------------
+        function computeStats() {
+            const stats = { ...BASE_STATS };
+
+            const muls = new Map();
+            const adds = new Map();
+            const sets = new Map();
+
+            const activeItems = resolveActiveItems();
+
+            for (const it of activeItems) {
+                for (const m of it.statMods) {
+                    if (m.type === 'mul') muls.set(m.key, (muls.get(m.key) ?? 1) * m.value);
+                    else if (m.type === 'add') adds.set(m.key, (adds.get(m.key) ?? 0) + m.value);
+                    else if (m.type === 'set') sets.set(m.key, m.value);
+                }
+            }
+
+            for (const [k, v] of muls) stats[k] = (stats[k] ?? 0) * v;
+            for (const [k, v] of adds) stats[k] = (stats[k] ?? 0) + v;
+            for (const [k, v] of sets) stats[k] = v;
+
+            // Derive final jumpCount AFTER mods:
+            const hasBoots = !!stats.hasBoots;
+            const base = stats.jumpBase ?? 0;
+            const bonus = stats.jumpBonus ?? 0;
+            stats.jumpCount = hasBoots ? (base + bonus) : 0;
+
+            return stats;
+        }
+
+        /* ============================================================
+           GAME LOOP
+        ============================================================ */
+        let last = performance.now();
+        function loop(t) {
+            const dt = Math.min((t - last) / 1000, 1 / 30); last = t;
+            update(dt);
+            render();
+            requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+
+        // Small helper to detect rising edge of Up for jump controllers if needed
+        let prevUp = false;
+        function pressedUp() {
+            const u = input.up();
+            const edge = u && !prevUp;
+            prevUp = u;
+            return edge;
+        }
+
+        function equippedList() { return [...equipped].map(id => ITEM_BY_ID[id]?.name || id).join(', ') || '—'; }
+
+        function resolveActiveItems() {
+            // Items are active if all their requires are in 'equipped'.
+            const reqsOk = (it) => !it.requires || it.requires.every(r => equipped.has(r));
+            return [...equipped]
+                .map(id => ITEM_BY_ID[id])
+                .filter(Boolean)
+                .filter(reqsOk);
+        }
+
+        function update(dt) {
+            const prevX = player.x, prevY = player.y;
+
+            const stats = computeStats();
+
+            // horizontal input -> velocity target
+            let targetVx = 0;
+            if (input.left()) { targetVx -= stats.moveSpeed; player.facing = -1; }
+            if (input.right()) { targetVx += stats.moveSpeed; player.facing = 1; }
+
+            // crouch slows you down (controller can toggle crouch)
+            const speedScale = (player.crouched ? stats.crouchSpeedScale : 1);
+            if (targetVx !== 0) player.vx = targetVx * speedScale;
+            else if (player.onGround) {
+                // ground friction
+                const sign = Math.sign(player.vx);
+                const mag = Math.max(0, Math.abs(player.vx) - stats.friction * dt);
+                player.vx = mag * sign; if (Math.abs(player.vx) < 1) player.vx = 0;
+            } else {
+                // some air control dampening
+                player.vx *= (1 - stats.airControl);
+            }
+
+            // apply gravity
+            player.vy += world.gravity * dt;
+
+            // integrate
+            const prevOnGround = player.onGround;
+            player.x += player.vx * dt;
+            player.y += player.vy * dt;
+
+            // --- Vertical collisions with ground/pits ---
+            const gy = groundAt(player.x + player.w / 2);
+            if (gy !== Infinity && player.y + player.h >= gy) {
+                player.y = gy - player.h;
+                player.vy = 0;
+                player.onGround = true;
+            } else {
+                player.onGround = false;
+            }
+
+            // --- One-way platforms (land from above only) ---
+            if (player.vy >= 0) {
+                for (const p of level.platforms) {
+                    const wasAbove = prevY + player.h <= p.y;
+                    const overlapX = (player.x + player.w > p.x) && (player.x < p.x + p.w);
+                    if (wasAbove && overlapX && player.y + player.h >= p.y && player.y + player.h <= p.y + p.h) {
+                        player.y = p.y - player.h;
+                        player.vy = 0;
+                        player.onGround = true;
+                    }
+                }
+            }
+
+            // Build a temp player rect for AABB checks
+            const R = () => ({ x: player.x, y: player.y, w: player.w, h: player.h });
+
+            // Walls: solid rectangles
+            for (const w of level.walls) {
+                if (!aabb(R(), w)) continue;
+                if (player.vx > 0) { player.x = w.x - player.w; player.vx = 0; }
+                else if (player.vx < 0) { player.x = w.x + w.w; player.vx = 0; }
+            }
+
+            // Low ceilings: act like horizontal blockers IF standing-height would intersect
+            for (const c of level.ceilings) {
+                const standingRect = { x: player.x, y: player.y + player.h - (BASE_STATS.height), w: player.w, h: BASE_STATS.height };
+                const standingHits = aabb(standingRect, c);
+                if (!standingHits) continue;
+
+                // If not crouched, treat as a horizontal barrier so you can't pass unless you crouch
+                if (!player.crouched) {
+                    if (player.vx > 0) { player.x = c.x - player.w; player.vx = 0; }
+                    else if (player.vx < 0) { player.x = c.x + c.w; player.vx = 0; }
+                } else {
+                    // If crouched AND still vertically intersecting (too low), push down slightly
+                    if (aabb(R(), c) && player.y + player.h > c.y) {
+                        player.y = c.y - player.h; // slide under ceiling
+                        player.vy = Math.min(0, player.vy);
+                        player.onGround = true;
+                    }
+                }
+            }
+
+            player.justGrounded = (!prevOnGround && player.onGround);
+
+            // clamp world bounds
+            if (player.x < 0) { player.x = 0; player.vx = 0; }
+            if (player.x + player.w > world.width) { player.x = world.width - player.w; player.vx = 0; }
+
+            // ensure jumpsLeft is synced when starting grounded
+            if (player.onGround && (player.jumpsLeft == null)) {
+                player.jumpsLeft = stats.jumpCount;
+            }
+
+            // Run controllers from equipped items (behavior hooks)
+            for (const id of equipped) {
+                const it = ITEM_BY_ID[id];
+                if (it && typeof it.controller === 'function') {
+                    it.controller(player, input, stats, dt, world);
+                }
+            }
+
+            // camera
+            const half = VIEW_W / 2;
+            world.cameraX = Math.max(0, Math.min(world.width - VIEW_W, player.x + player.w / 2 - half));
+
+            // UI refresh
+            updateHUD(stats);
+            equippedList();
+        }
+
+        /* ============================================================
+           RENDER
+        ============================================================ */
+        function render() {
+            // Clear
+            ctx.fillStyle = world.bg;
+            ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+            ctx.save();
+            ctx.translate(Math.floor(-world.cameraX), 0);
+
+            // Ground
+            ctx.fillStyle = world.ground;
+            ctx.fillRect(0, world.groundY, world.width, VIEW_H - world.groundY);
+
+            // Pits (dark void)
+            ctx.fillStyle = '#0b0d12';
+            for (const p of level.pits) {
+                ctx.fillRect(p.x, world.groundY, p.w, VIEW_H - world.groundY);
+            }
+
+            // Platforms (one-way)
+            ctx.fillStyle = '#3a4152';
+            for (const pl of level.platforms) {
+                ctx.fillRect(pl.x, pl.y, pl.w, pl.h);
+            }
+
+            // Walls (solid)
+            ctx.fillStyle = '#424959';
+            for (const w of level.walls) {
+                ctx.fillRect(w.x, w.y, w.w, w.h);
+            }
+
+            // Ceilings / tunnels
+            ctx.fillStyle = '#2f3544';
+            for (const c of level.ceilings) {
+                ctx.fillRect(c.x, c.y, c.w, c.h);
+            }
+
+            // Player last
+            ctx.fillStyle = '#e6f0ff';
+            ctx.fillRect(Math.floor(player.x), Math.floor(player.y), player.w, player.h);
+            // Face / direction
+            ctx.fillStyle = '#1f2430';
+            const eyeX = player.facing === 1 ? player.x + player.w - 10 : player.x + 6;
+            ctx.fillRect(Math.floor(eyeX), Math.floor(player.y + 18), 4, 4);
+
+            ctx.restore();
+
+            // Horizon line
+            ctx.strokeStyle = 'rgba(255,255,255,.06)';
+            ctx.beginPath();
+            ctx.moveTo(0, world.groundY + .5);
+            ctx.lineTo(VIEW_W, world.groundY + .5);
+            ctx.stroke();
+        }
+
+
+        /* ============================================================
+           HUD (equip toggles)
+        ============================================================ */
+        const chipsEl = document.getElementById('chips');
+        const limitEl = document.getElementById('limit');
+        const statlineEl = document.getElementById('statline');
+
+        function updateHUD(stats) {
+            limitEl.textContent = `Slots used: ${equipped.size}/${EQUIP_LIMIT}`;
+            statlineEl.textContent =
+                `equipped: ${equippedList()}  |  `
+                + `speed=${(stats.moveSpeed * (player.crouched ? stats.crouchSpeedScale : 1)) | 0}  `
+                + `jumpPower=${stats.jumpPower}  jumps=${stats.jumpCount}  `
+                + `crouch=${stats.canCrouch ? 'yes' : 'no'}  ledge=${stats.canLedgeGrab ? 'yes' : 'no'}`;
+
+        }
+
+        function renderChips() {
+            chipsEl.innerHTML = '';
+            for (const it of ITEMS) {
+                const div = document.createElement('div');
+                div.className = 'chip' + (equipped.has(it.id) ? ' active' : '');
+                div.textContent = it.name;
+                div.onclick = () => { toggleEquip(it.id); renderChips(); };
+                chipsEl.appendChild(div);
+            }
+        }
+        renderChips();
+
+        /* ============================================================
+           SPRITE HOOK — where to add art later
+        ============================================================ */
+        // 1) Put your sprite sheet next to this file, e.g. "hero.png".
+        // 2) Load it: const hero = new Image(); hero.src = 'hero.png';
+        // 3) In render(), replace the rectangle with ctx.drawImage(hero, sx,sy,sw,sh, dx,dy,dw,dh);
+        //    To flip horizontally, use ctx.save(); ctx.scale(-1,1); then draw with negative x.
+        //
+        // (Kept out of this starter so the ability system stands alone.)
+    </script>
+</body>
+
+</html>

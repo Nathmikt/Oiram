@@ -1,0 +1,20 @@
+[
+  {
+    "id": "wall_climb",
+    "name": "Wall Climb",
+    "icon": "🧗",
+    "description": "Cling to vertical surfaces and ascend walls."
+  },
+  {
+    "id": "swim",
+    "name": "Subaquatic Swim",
+    "icon": "🏊",
+    "description": "Free movement and buoyancy in water bodies."
+  },
+  {
+    "id": "dig",
+    "name": "Terrain Dig",
+    "icon": "⛏️",
+    "description": "Excavate solid rock tiles with Action Key + Direction."
+  }
+]

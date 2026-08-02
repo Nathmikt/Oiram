@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Alien World Platformer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #06080d;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      image-rendering: pixelated;
+    }
+    .hud {
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      color: #9aa8b8;
+      font-size: 13px;
+      background: rgba(10, 14, 22, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(6px);
+      padding: 10px 14px;
+      border-radius: 8px;
+      user-select: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    .hud span {
+      color: #e2e8f0;
+      font-weight: 600;
+    }
+    .inventory-hud {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      background: rgba(10, 14, 22, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(8px);
+      padding: 12px 14px;
+      border-radius: 10px;
+      color: #cbd5e1;
+      font-size: 12px;
+      user-select: none;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+    }
+    .inv-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+    .inv-slots {
+      display: flex;
+      gap: 8px;
+    }
+    .inv-slot {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .inv-slot:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .inv-slot.active {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: rgba(56, 189, 248, 0.4);
+      color: #7dd3fc;
+    }
+    .inv-slot .key {
+      font-size: 10px;
+      color: #94a3b8;
+      font-weight: 700;
+    }
+    .inv-slot .icon {
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div class="hud">
+    <span>A/D</span> or <span>← / →</span> Move • <span>Space</span> Jump/Climb • <span>Shift / C</span> + Dir Dig • <span>1/2/3</span> Abilities
+  </div>
+
+  <script type="module" src="./engine/GameLoop.js"></script>
+</body>
+</html>

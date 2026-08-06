@@ -8,13 +8,13 @@ export class Environment {
 
   initAmbientParticles() {
     const wispColors = ['#a8e6cf', '#ffd3b6', '#dcedc1'];
-    // Rule of thumb: lower total number (16 wisps) with wide spawn perimeter
     const wispCount = 16;
     for (let i = 0; i < wispCount; i++) {
+      const initialY = 600 + Math.random() * 1200;
       this.spores.push({
         x: (Math.random() - 0.5) * 3000,
-        y: Math.random() * 1800,
-        baseY: Math.random() * 1800,
+        y: initialY,
+        baseY: initialY,
         radius: Math.random() * 1.5 + 1.0,
         speedX: (Math.random() - 0.5) * 12,
         speedY: (Math.random() - 0.5) * 8,
@@ -45,17 +45,21 @@ export class Environment {
     const camW = camera && Number.isFinite(camera.width) ? camera.width : 1024;
     const camH = camera && Number.isFinite(camera.height) ? camera.height : 576;
 
-    // Wide spawn perimeter margin (800px) around camera viewport
     const padding = 800;
 
     for (const s of this.spores) {
       s.x += s.speedX * dt;
       s.baseY += s.speedY * dt;
-      s.y = s.baseY + Math.sin(time * s.floatFreq + s.x * 0.008) * s.floatAmp;
 
+      // Ceiling Physics Bounce: Trap wisps inside cavern layer (Y >= 600)
+      if (s.baseY < 600 && s.speedY < 0) {
+        s.speedY *= -1;
+      }
+
+      s.y = s.baseY + Math.sin(time * s.floatFreq + s.x * 0.008) * s.floatAmp;
       s.life -= dt;
 
-      // Recycle if life expires or drifts far outside wide perimeter
+      // Recycle if life expires or drifts far outside camera perimeter
       if (
         s.life <= 0 ||
         s.x < camX - padding ||
@@ -65,9 +69,8 @@ export class Environment {
       ) {
         s.life = Math.random() * 12 + 6;
         s.maxLife = s.life;
-        // Spawn in wide off-screen perimeter around camera
         s.x = camX - (padding - 100) + Math.random() * (camW + (padding - 100) * 2);
-        s.baseY = camY - (padding - 100) + Math.random() * (camH + (padding - 100) * 2);
+        s.baseY = Math.max(620, camY - (padding - 100) + Math.random() * (camH + (padding - 100) * 2));
         s.y = s.baseY;
       }
 
@@ -89,9 +92,6 @@ export class Environment {
   }
 
   drawLuminousLightPass(ctx, camera) {
-    const biome = this.levelManager.currentBiome || 'surface';
-    if (biome === 'surface') return;
-
     const camX = Number.isFinite(camera.x) ? camera.x : 0;
     const camY = Number.isFinite(camera.y) ? camera.y : 0;
     const camW = Number.isFinite(camera.width) ? camera.width : 800;
@@ -100,6 +100,12 @@ export class Environment {
     for (const s of this.spores) {
       const screenX = s.x - camX;
       const screenY = s.y - camY;
+
+      // Mandatory Fix 2: Spatial Alpha Fading near surface boundary (Y = 576)
+      const spatialAlpha = Math.max(0, Math.min(1, (s.y - 500) / 150));
+      const effectiveAlpha = s.alpha * spatialAlpha;
+
+      if (effectiveAlpha <= 0.01) continue;
 
       if (
         screenX < -120 ||
@@ -111,7 +117,7 @@ export class Environment {
       }
 
       const lightGrad = ctx.createRadialGradient(screenX, screenY, 0, screenX, screenY, 50);
-      lightGrad.addColorStop(0, `rgba(255, 255, 255, ${s.alpha * 0.7})`);
+      lightGrad.addColorStop(0, `rgba(255, 255, 255, ${effectiveAlpha * 0.7})`);
       lightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
 
       ctx.fillStyle = lightGrad;
@@ -122,9 +128,6 @@ export class Environment {
   }
 
   drawLuminousCores(ctx, camera) {
-    const biome = this.levelManager.currentBiome || 'surface';
-    if (biome === 'surface') return;
-
     const camX = Number.isFinite(camera.x) ? camera.x : 0;
     const camY = Number.isFinite(camera.y) ? camera.y : 0;
     const camW = Number.isFinite(camera.width) ? camera.width : 800;
@@ -133,6 +136,12 @@ export class Environment {
     for (const s of this.spores) {
       const sx = Number.isFinite(s.x) ? s.x : 0;
       const sy = Number.isFinite(s.y) ? s.y : 0;
+
+      // Mandatory Fix 2: Spatial Alpha Fading
+      const spatialAlpha = Math.max(0, Math.min(1, (s.y - 500) / 150));
+      const effectiveAlpha = s.alpha * spatialAlpha;
+
+      if (effectiveAlpha <= 0.01) continue;
 
       if (
         sx < camX - 60 ||
@@ -144,7 +153,7 @@ export class Environment {
       }
 
       ctx.fillStyle = s.color;
-      ctx.globalAlpha = s.alpha;
+      ctx.globalAlpha = effectiveAlpha;
       ctx.beginPath();
       ctx.arc(sx, sy, s.radius, 0, Math.PI * 2);
       ctx.fill();
@@ -155,8 +164,6 @@ export class Environment {
   draw(ctx, camera) {
     if (!this.levelManager || !this.levelManager.activeChunks) return;
 
-    const biome = this.levelManager.currentBiome || 'surface';
-
     const camX = Number.isFinite(camera.x) ? camera.x : 0;
     const camY = Number.isFinite(camera.y) ? camera.y : 0;
     const camW = Number.isFinite(camera.width) ? camera.width : 800;
@@ -164,26 +171,32 @@ export class Environment {
 
     ctx.save();
 
-    // Biome Parallax Background
-    if (biome === 'surface') {
-      const skyGrad = ctx.createLinearGradient(0, camY, 0, camY + camH);
-      skyGrad.addColorStop(0, '#0f172a');
-      skyGrad.addColorStop(1, '#1e293b');
-      ctx.fillStyle = skyGrad;
-      ctx.fillRect(camX, camY, camW, camH);
+    // Mandatory Fix 1: Camera-Based Skybox Interpolation (Alpha Overlay Trick)
+    // Step A: Surface Twilight Skybox Base Layer
+    const skyGrad = ctx.createLinearGradient(0, camY, 0, camY + camH);
+    skyGrad.addColorStop(0, '#0f172a');
+    skyGrad.addColorStop(1, '#1e293b');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(camX, camY, camW, camH);
 
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+    // Surface Clouds: Alpha fades as camera pans underground
+    const cloudAlpha = Math.max(0, Math.min(1, 1 - (camY / 500)));
+    if (cloudAlpha > 0.01) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${cloudAlpha * 0.06})`;
       for (const c of this.clouds) {
         ctx.beginPath();
         ctx.roundRect(c.x, c.y, c.width, c.height, 12);
         ctx.fill();
       }
-    } else if (biome === 'subterranean') {
+    }
+
+    // Step B & C: Calculate camera depthBlend & blend Subterranean Dark Cavern Fill
+    const depthBlend = Math.max(0, Math.min(1, camY / 800));
+    if (depthBlend > 0) {
+      ctx.globalAlpha = depthBlend;
       ctx.fillStyle = '#090d16';
       ctx.fillRect(camX, camY, camW, camH);
-    } else if (biome === 'deep_cave') {
-      ctx.fillStyle = '#05070c';
-      ctx.fillRect(camX, camY, camW, camH);
+      ctx.globalAlpha = 1.0;
     }
 
     // Render active chunk tiles (Solids, Platforms, Hazards)

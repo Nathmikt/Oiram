@@ -99,6 +99,16 @@ export class LevelManager {
     }
   }
 
+  removeDeadEnemies() {
+    for (const chunk of this.activeChunks.values()) {
+      if (chunk.enemies) {
+        chunk.enemies = chunk.enemies.filter(e => !e.isDead || (e.particles && e.particles.length > 0));
+      }
+    }
+    this.activeEnemies = this.activeEnemies.filter(e => !e.isDead || (e.particles && e.particles.length > 0));
+  }
+
+
   getLiquidMassAtWorldPos(worldX, worldY) {
     const cx = Math.floor(worldX / this.chunkPixelWidth);
     const cy = Math.floor(worldY / this.chunkPixelHeight);

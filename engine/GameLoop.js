@@ -83,27 +83,71 @@ export class GameLoop {
       }
     }
 
-    // Update active enemies & AI patrolling
+    // Update active enemies & AI patrolling & physics
     if (Array.isArray(this.levelManager.activeEnemies)) {
       for (const enemy of this.levelManager.activeEnemies) {
-        enemy.update(dt, this.levelManager);
+        if (enemy.isDead) {
+          enemy.update(dt, this.levelManager, this.player);
+          continue;
+        }
 
-        // Player vs Enemy AABB collision
+        // 1. AI Behavior Execution
+        enemy.update(dt, this.levelManager, this.player);
+
+        // 2. Physics & AABB Terrain Integration
+        this.physics.applyPhysics(enemy, dt, this.levelManager);
+
+        // 3. Player vs Enemy AABB Collision & Stomp Combat
         if (
           this.player.x < enemy.x + enemy.width &&
           this.player.x + this.player.width > enemy.x &&
           this.player.y < enemy.y + enemy.height &&
           this.player.y + this.player.height > enemy.y
         ) {
-          const tookDamage = this.health.takeDamage(enemy.damage);
-          if (tookDamage) {
-            const pushDir = this.player.x < enemy.x ? -1 : 1;
-            this.player.vx = pushDir * 320;
-            this.player.vy = -260;
+          const playerBottom = this.player.y + this.player.height;
+          const isStomp = this.player.vy > 0 && playerBottom - (this.player.vy * dt) <= enemy.y + 14;
+
+          if (isStomp) {
+            enemy.takeDamage(1);
+            this.player.vy = -380;
+            this.player.scaleX = 0.8;
+            this.player.scaleY = 1.2;
+            this.player.createDust(4);
+          } else {
+            const tookDamage = this.health.takeDamage(enemy.damage);
+            if (tookDamage) {
+              const pushDir = this.player.x < enemy.x ? -1 : 1;
+              this.player.vx = pushDir * 320;
+              this.player.vy = -260;
+            }
+          }
+        }
+
+        // 4. Enemy Projectiles vs Player Collision
+        if (enemy.behavior && Array.isArray(enemy.behavior.projectiles)) {
+          for (let i = enemy.behavior.projectiles.length - 1; i >= 0; i--) {
+            const p = enemy.behavior.projectiles[i];
+            if (
+              p.x + p.radius > this.player.x &&
+              p.x - p.radius < this.player.x + this.player.width &&
+              p.y + p.radius > this.player.y &&
+              p.y - p.radius < this.player.y + this.player.height
+            ) {
+              const tookDamage = this.health.takeDamage(p.damage);
+              if (tookDamage) {
+                const pushDir = this.player.x < p.x ? -1 : 1;
+                this.player.vx = pushDir * 280;
+                this.player.vy = -200;
+              }
+              enemy.behavior.projectiles.splice(i, 1);
+            }
           }
         }
       }
+
+      this.levelManager.removeDeadEnemies();
     }
+
 
     // Ability component system & physics updates
     this.player.handleInput(this.input);

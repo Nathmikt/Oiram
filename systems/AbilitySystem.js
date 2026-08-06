@@ -58,13 +58,7 @@ export class AbilitySystem {
   }
 
   applySwim(player, input, physics, levelManager, dt) {
-    const sampleX = player.x + player.width / 2;
-    const sampleY = player.y + player.height / 2;
-    const waterMass = levelManager.getLiquidMassAtWorldPos(sampleX, sampleY);
-
-    if (waterMass > 0.6) {
-      player.inWater = true;
-
+    if (player.inWater) {
       player.vx *= 0.88;
       player.vy *= 0.88;
       player.vy -= physics.gravity * dt * 0.85;
@@ -82,13 +76,19 @@ export class AbilitySystem {
       if (input.isDown('ArrowDown') || input.isDown('KeyS')) {
         player.vy = swimSpeed;
       }
-    } else if (waterMass > 0.05) {
-      // Shallow water puddle: drag & 300ms throttled splash particle emission
-      player.vx *= 0.95;
-      const now = performance.now();
-      if (Math.abs(player.vx) > 40 && now - player.lastSplashTime > 300) {
-        player.createSplash();
-        player.lastSplashTime = now;
+    } else {
+      const sampleX = player.x + player.width / 2;
+      const sampleY = player.y + player.height / 2;
+      const waterMass = levelManager.getLiquidMassAtWorldPos(sampleX, sampleY);
+
+      if (waterMass > 0.05) {
+        // Shallow water puddle: drag & 300ms throttled splash particle emission
+        player.vx *= 0.95;
+        const now = performance.now();
+        if (Math.abs(player.vx) > 40 && now - player.lastSplashTime > 300) {
+          player.createSplash();
+          player.lastSplashTime = now;
+        }
       }
     }
   }

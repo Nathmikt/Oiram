@@ -1,44 +1,200 @@
 import { Entity } from './Entity.js';
+import { EnemyRegistry } from '../data/enemy_types.js';
+import { getBehavior } from './behaviors/index.js';
 
 export class Enemy extends Entity {
-  constructor(x, y, type = 'crawler') {
-    super(x, y, 28, 28);
-    this.type = type;
-    this.speed = type === 'spitter' ? 60 : 100;
-    this.direction = 1;
-    this.color = type === 'spitter' ? '#a855f7' : '#e11d48';
+  constructor(x, y, type = 'walker') {
+    const typeKey = String(type || 'walker').toLowerCase();
+    const config = EnemyRegistry[typeKey] || EnemyRegistry.walker;
+
+    super(x, y, config.width, config.height);
+    this.type = config.name || typeKey;
+    this.specs = config;
+    this.speed = config.speed;
+    this.color = config.color;
+    this.hp = config.hp;
+    this.maxHp = config.hp;
+    this.damage = config.damage || 15;
+    this.ignoresGravity = !!config.ignoresGravity;
+    this.isAquatic = !!config.isAquatic;
+
+    this.facing = 1;
+    this.behavior = getBehavior(config.behavior);
+    this.submergedTime = 0;
+    this.hitTimer = 0;
+    this.isDead = false;
+    this.particles = [];
   }
 
-  update(dt, levelManager) {
-    if (!levelManager) return;
+  get direction() {
+    return this.facing;
+  }
 
-    this.vx = this.speed * this.direction;
+  set direction(val) {
+    this.facing = val;
+  }
 
-    const nextX = this.x + (this.direction > 0 ? this.width + 4 : -4);
-    const wallTiles = levelManager.getSolidTilesInRect(nextX, this.y, 4, this.height);
+  takeDamage(amount) {
+    if (this.isDead) return;
+    this.hp = Math.max(0, this.hp - amount);
+    this.hitTimer = 0.2;
 
-    const checkY = this.y + this.height + 4;
-    const checkX = this.x + (this.direction > 0 ? this.width : 0);
-    const ledgeTiles = levelManager.getSolidTilesInRect(checkX, checkY, 4, 4);
+    if (this.hp <= 0) {
+      this.die();
+    }
+  }
 
-    if (wallTiles.length > 0 || ledgeTiles.length === 0) {
-      this.direction *= -1;
-      this.vx = this.speed * this.direction;
+  die() {
+    this.isDead = true;
+    this.createDeathParticles();
+  }
+
+  createDeathParticles() {
+    for (let i = 0; i < 12; i++) {
+      this.particles.push({
+        x: this.x + this.width / 2,
+        y: this.y + this.height / 2,
+        vx: (Math.random() - 0.5) * 160,
+        vy: (Math.random() - 0.5) * 160,
+        radius: Math.random() * 4 + 2,
+        color: this.color,
+        life: 0.5
+      });
+    }
+  }
+
+  update(dt, levelManager, player) {
+    if (this.hitTimer > 0) {
+      this.hitTimer -= dt;
+    }
+
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt;
+      if (p.life <= 0) {
+        this.particles.splice(i, 1);
+      }
+    }
+
+    if (this.isDead) return;
+
+    // Drowning mechanic check
+    if (levelManager && typeof levelManager.getLiquidMassAtWorldPos === 'function') {
+      const centerX = this.x + this.width / 2;
+      const centerY = this.y + this.height / 2;
+      const liquidMass = levelManager.getLiquidMassAtWorldPos(centerX, centerY);
+
+      if (liquidMass !== null && liquidMass > 0.6 && !this.specs.isAquatic) {
+        this.submergedTime += dt;
+        if (this.submergedTime > 3.0) {
+          this.takeDamage(this.hp); // Instant drowning death
+        }
+      } else {
+        this.submergedTime = 0;
+      }
+    }
+
+    if (this.behavior) {
+      this.behavior.execute(this, dt, levelManager, player);
     }
   }
 
   draw(ctx) {
     ctx.save();
-    ctx.fillStyle = this.color;
+
+    // Draw death/hit particles
+    for (const p of this.particles) {
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = Math.max(0, p.life / 0.5);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw behavior-specific graphics (e.g. projectiles)
+    if (this.behavior && typeof this.behavior.draw === 'function') {
+      this.behavior.draw(this, ctx);
+    }
+
+    if (this.isDead) {
+      ctx.restore();
+      return;
+    }
+
+    const color = this.hitTimer > 0 ? '#ffffff' : this.specs.color || this.color;
+    ctx.fillStyle = color;
+    ctx.strokeStyle = color;
+
+    const shape = this.specs.shape || 'circle';
+    const centerX = this.x + this.width / 2;
+    const centerY = this.y + this.height / 2;
+
+    switch (shape) {
+      case 'square':
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        break;
+
+      case 'spiked_square':
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        // Draw 2 small triangular spikes on top
+        ctx.beginPath();
+        ctx.moveTo(this.x + 3, this.y);
+        ctx.lineTo(this.x + 8, this.y - 6);
+        ctx.lineTo(this.x + 13, this.y);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(this.x + this.width - 13, this.y);
+        ctx.lineTo(this.x + this.width - 8, this.y - 6);
+        ctx.lineTo(this.x + this.width - 3, this.y);
+        ctx.closePath();
+        ctx.fill();
+        break;
+
+      case 'tall_rect':
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        break;
+
+      case 'oval':
+        ctx.beginPath();
+        ctx.ellipse(centerX, centerY, this.width / 2, this.height / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+
+      case 'circle':
+      default:
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, this.width / 2, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+    }
+
+    // Eyes
+    ctx.fillStyle = '#ffffff';
+    const eyeOffsetX = (this.facing || 1) > 0 ? 5 : -5;
     ctx.beginPath();
-    ctx.arc(this.x + this.width / 2, this.y + this.height / 2, this.width / 2, 0, Math.PI * 2);
+    ctx.arc(centerX + eyeOffsetX, this.y + this.height / 3, 2.5, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#ffffff';
-    const eyeOffsetX = this.direction > 0 ? 6 : -6;
-    ctx.beginPath();
-    ctx.arc(this.x + this.width / 2 + eyeOffsetX, this.y + this.height / 3, 3, 0, Math.PI * 2);
-    ctx.fill();
+    // Health Bar if damaged
+    if (this.hp < this.maxHp) {
+      const barW = this.width;
+      const barH = 4;
+      const barX = this.x;
+      const barY = this.y - 8;
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(barX, barY, barW, barH);
+
+      const hpRatio = Math.max(0, this.hp / this.maxHp);
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(barX, barY, barW * hpRatio, barH);
+    }
+
     ctx.restore();
   }
 }

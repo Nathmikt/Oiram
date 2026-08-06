@@ -153,25 +153,67 @@ export class WorldGenerator {
       }
     }
 
-    // Deterministic Enemy Spawning
+    // Deterministic Multi-Enemy & Diverse Spawning
     const chunkSeed = (cx * 73856093) ^ (cy * 19349663) ^ this.seed;
-    const enemyPRNG = this.simplex.mulberry32(chunkSeed)();
+    const rng = this.simplex.mulberry32(chunkSeed);
 
-    if (enemyPRNG > 0.55) {
-      const spawnCol = Math.floor(enemyPRNG * (this.chunkWidth - 4)) + 2;
-      for (let r = 2; r < this.chunkHeight - 1; r++) {
-        const idx = r * this.chunkWidth + spawnCol;
-        const belowIdx = (r + 1) * this.chunkWidth + spawnCol;
-        if (tiles[idx] === 0 && liquidMass[idx] === 0 && tiles[belowIdx] === 1) {
-          entities.push({
-            type: enemyPRNG > 0.75 ? 'Spitter' : 'Crawler',
-            x: spawnCol * this.tileSize + 4,
-            y: r * this.tileSize
-          });
-          break;
+    const spawnAttempts = Math.floor(rng() * 3) + 2;
+
+    for (let i = 0; i < spawnAttempts; i++) {
+      const roll = rng();
+      if (roll > 0.30) {
+        const spawnCol = Math.floor(rng() * (this.chunkWidth - 4)) + 2;
+        let spawned = false;
+
+        // Check for swimmer in water
+        for (let r = 2; r < this.chunkHeight - 1; r++) {
+          const idx = r * this.chunkWidth + spawnCol;
+          if (liquidMass[idx] > 0.4 && tiles[idx] === 0) {
+            entities.push({
+              type: 'swimmer',
+              x: spawnCol * this.tileSize + 4,
+              y: r * this.tileSize
+            });
+            spawned = true;
+            break;
+          }
+        }
+
+        // Check for ground or flying spawns
+        if (!spawned) {
+          for (let r = 2; r < this.chunkHeight - 1; r++) {
+            const idx = r * this.chunkWidth + spawnCol;
+            const belowIdx = (r + 1) * this.chunkWidth + spawnCol;
+
+            if (tiles[idx] === 0 && liquidMass[idx] === 0) {
+              if (tiles[belowIdx] === 1) {
+                const typeRoll = rng();
+                let selectedType = 'walker';
+                if (typeRoll > 0.70) selectedType = 'jumper';
+                else if (typeRoll > 0.35) selectedType = 'aggro_walker';
+
+                entities.push({
+                  type: selectedType,
+                  x: spawnCol * this.tileSize + 4,
+                  y: r * this.tileSize
+                });
+                spawned = true;
+                break;
+              } else if (r <= 8 && rng() > 0.65) {
+                entities.push({
+                  type: 'flier',
+                  x: spawnCol * this.tileSize + 4,
+                  y: r * this.tileSize
+                });
+                spawned = true;
+                break;
+              }
+            }
+          }
         }
       }
     }
+
 
     return {
       biome: biome,

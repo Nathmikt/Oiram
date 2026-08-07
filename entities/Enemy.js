@@ -82,17 +82,20 @@ export class Enemy extends Entity {
 
     // Drowning mechanic check
     if (levelManager && typeof levelManager.getLiquidMassAtWorldPos === 'function') {
-      const centerX = this.x + this.width / 2;
-      const centerY = this.y + this.height / 2;
-      const liquidMass = levelManager.getLiquidMassAtWorldPos(centerX, centerY);
+      if (!this.specs.isAquatic) {
+        const centerX = this.x + this.width / 2;
+        const centerY = this.y + this.height / 2;
+        const liquidMass = levelManager.getLiquidMassAtWorldPos(centerX, centerY);
 
-      if (liquidMass !== null && liquidMass > 0.6 && !this.specs.isAquatic) {
-        this.submergedTime += dt;
-        if (this.submergedTime > 3.0) {
-          this.takeDamage(this.hp); // Instant drowning death
+        // Require full submergence (>0.8 mass) to begin drowning timer
+        if (liquidMass !== null && liquidMass > 0.8) {
+          this.submergedTime = (this.submergedTime || 0) + dt;
+          if (this.submergedTime >= 8.0) { // Increased grace period from 3.0s to 8.0s
+            this.takeDamage(this.hp);
+          }
+        } else {
+          this.submergedTime = 0;
         }
-      } else {
-        this.submergedTime = 0;
       }
     }
 

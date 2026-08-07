@@ -187,18 +187,27 @@ export class WorldGenerator {
 
             if (tiles[idx] === 0 && liquidMass[idx] === 0) {
               if (tiles[belowIdx] === 1) {
-                const typeRoll = rng();
-                let selectedType = 'walker';
-                if (typeRoll > 0.70) selectedType = 'jumper';
-                else if (typeRoll > 0.35) selectedType = 'aggro_walker';
+                const centerMass = liquidMass[idx] || 0;
+                const leftIdx = r * this.chunkWidth + (spawnCol - 1);
+                const rightIdx = r * this.chunkWidth + (spawnCol + 1);
+                const leftMass = (spawnCol > 0 ? liquidMass[leftIdx] : 0) || 0;
+                const rightMass = (spawnCol < this.chunkWidth - 1 ? liquidMass[rightIdx] : 0) || 0;
 
-                entities.push({
-                  type: selectedType,
-                  x: spawnCol * this.tileSize + 4,
-                  y: r * this.tileSize
-                });
-                spawned = true;
-                break;
+                // Skip ground enemy spawn if spawn location or adjacent tiles contain water (>0.1 mass)
+                if (centerMass <= 0.1 && leftMass <= 0.1 && rightMass <= 0.1) {
+                  const typeRoll = rng();
+                  let selectedType = 'walker';
+                  if (typeRoll > 0.70) selectedType = 'jumper';
+                  else if (typeRoll > 0.35) selectedType = 'aggro_walker';
+
+                  entities.push({
+                    type: selectedType,
+                    x: spawnCol * this.tileSize + 4,
+                    y: r * this.tileSize
+                  });
+                  spawned = true;
+                  break;
+                }
               } else if (r <= 8 && rng() > 0.65) {
                 entities.push({
                   type: 'flier',

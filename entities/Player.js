@@ -69,7 +69,8 @@ export class Player extends Entity {
   handleInput(input) {
     this.ax = 0;
 
-    if (!this.inWater && !this.isWallClimbing) {
+    // Allow ground/jump controls unless actively wall climbing or executing 360 swim propulsion
+    if (!this.isSwimming && !this.isWallClimbing) {
       if (input.isDown('ArrowLeft') || input.isDown('KeyA')) {
         this.vx = -this.speed;
         this.ax = -1;

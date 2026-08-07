@@ -12,7 +12,7 @@ export class AbilitySystem {
     if (!player || !inventory || !levelManager) return;
 
     player.isWallClimbing = false;
-    player.inWater = false;
+    player.isSwimming = false;
 
     if (this.digCooldown > 0) {
       this.digCooldown = Math.max(0, this.digCooldown - dt);
@@ -59,6 +59,8 @@ export class AbilitySystem {
 
   applySwim(player, input, physics, levelManager, dt) {
     if (player.inWater) {
+      player.isSwimming = true;
+
       player.vx *= 0.88;
       player.vy *= 0.88;
       player.vy -= physics.gravity * dt * 0.85;

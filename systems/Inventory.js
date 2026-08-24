@@ -2,7 +2,6 @@ export class Inventory {
   constructor() {
     this.abilities = new Map();
     this.equipped = new Set();
-    this.init();
   }
 
   async init() {
@@ -12,6 +11,7 @@ export class Inventory {
       for (const item of data) {
         this.abilities.set(item.id, item);
       }
+      this.equip('sprint');
       this.equip('wall_climb');
       this.equip('swim');
       this.equip('dig');

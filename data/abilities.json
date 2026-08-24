@@ -1,5 +1,11 @@
 [
   {
+    "id": "sprint",
+    "name": "Sprint",
+    "icon": "⚡",
+    "description": "Increase movement speed while enabled."
+  },
+  {
     "id": "wall_climb",
     "name": "Wall Climb",
     "icon": "🧗",

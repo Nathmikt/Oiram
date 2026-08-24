@@ -104,7 +104,36 @@ export class Enemy extends Entity {
     }
   }
 
-  draw(ctx) {
+  getSpriteKey() {
+    const typeKey = (this.type || "unknown").toLowerCase();
+    
+    if (typeKey === 'swimmer') {
+      if (Math.abs(this.vx) < 5) return 'swimmer_idle';
+      
+      // Toggle between frame 1 and 2 every 150ms based on system time
+      const animFrame = Math.floor(performance.now() / 150) % 2 + 1;
+      return this.facing > 0 ? `swimmer_swim_right${animFrame}` : `swimmer_swim_left${animFrame}`;
+    }
+
+    if (
+      typeKey === 'aggro_walker' ||
+      typeKey === 'aggro walker' ||
+      typeKey === 'spitter' ||
+      typeKey === 'aggressive_red_slime' ||
+      typeKey === 'red_slime' ||
+      this.specs?.behavior === 'AggressivePatrolBehavior'
+    ) {
+      if (Math.abs(this.vx) < 5) return 'aggro_red_slime_idle';
+
+      const animFrame = Math.floor(performance.now() / 150) % 2 + 1;
+      return this.facing > 0 ? `aggro_red_slime_walk_right${animFrame}` : `aggro_red_slime_walk_left${animFrame}`;
+    }
+    
+    // Return null for enemies without mapped sprites to trigger the vector fallback
+    return null; 
+  }
+
+  draw(ctx, textureManager) {
     ctx.save();
 
     // Draw death/hit particles
@@ -127,61 +156,71 @@ export class Enemy extends Entity {
       return;
     }
 
-    const color = this.hitTimer > 0 ? '#ffffff' : this.specs.color || this.color;
-    ctx.fillStyle = color;
-    ctx.strokeStyle = color;
+    // 1. Attempt to fetch sprite based on enemy state
+    const spriteKey = this.getSpriteKey();
+    const img = (textureManager && spriteKey) ? textureManager.get(spriteKey) : null;
 
-    const shape = this.specs.shape || 'circle';
-    const centerX = this.x + this.width / 2;
-    const centerY = this.y + this.height / 2;
+    if (img) {
+      // 2A. Render Sprite
+      ctx.drawImage(img, this.x, this.y, this.width, this.height);
+    } else {
+      // 2B. Fallback to Vector Shapes
+      const color = this.hitTimer > 0 ? '#ffffff' : (this.specs.color || this.color);
+      ctx.fillStyle = color;
+      ctx.strokeStyle = color;
 
-    switch (shape) {
-      case 'square':
-        ctx.fillRect(this.x, this.y, this.width, this.height);
-        break;
+      const shape = this.specs.shape || 'circle';
+      const centerX = this.x + this.width / 2;
+      const centerY = this.y + this.height / 2;
 
-      case 'spiked_square':
-        ctx.fillRect(this.x, this.y, this.width, this.height);
-        // Draw 2 small triangular spikes on top
-        ctx.beginPath();
-        ctx.moveTo(this.x + 3, this.y);
-        ctx.lineTo(this.x + 8, this.y - 6);
-        ctx.lineTo(this.x + 13, this.y);
-        ctx.closePath();
-        ctx.fill();
+      switch (shape) {
+        case 'square':
+          ctx.fillRect(this.x, this.y, this.width, this.height);
+          break;
 
-        ctx.beginPath();
-        ctx.moveTo(this.x + this.width - 13, this.y);
-        ctx.lineTo(this.x + this.width - 8, this.y - 6);
-        ctx.lineTo(this.x + this.width - 3, this.y);
-        ctx.closePath();
-        ctx.fill();
-        break;
+        case 'spiked_square':
+          ctx.fillRect(this.x, this.y, this.width, this.height);
+          // Draw 2 small triangular spikes on top
+          ctx.beginPath();
+          ctx.moveTo(this.x + 3, this.y);
+          ctx.lineTo(this.x + 8, this.y - 6);
+          ctx.lineTo(this.x + 13, this.y);
+          ctx.closePath();
+          ctx.fill();
 
-      case 'tall_rect':
-        ctx.fillRect(this.x, this.y, this.width, this.height);
-        break;
+          ctx.beginPath();
+          ctx.moveTo(this.x + this.width - 13, this.y);
+          ctx.lineTo(this.x + this.width - 8, this.y - 6);
+          ctx.lineTo(this.x + this.width - 3, this.y);
+          ctx.closePath();
+          ctx.fill();
+          break;
 
-      case 'oval':
-        ctx.beginPath();
-        ctx.ellipse(centerX, centerY, this.width / 2, this.height / 2, 0, 0, Math.PI * 2);
-        ctx.fill();
-        break;
+        case 'tall_rect':
+          ctx.fillRect(this.x, this.y, this.width, this.height);
+          break;
 
-      case 'circle':
-      default:
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, this.width / 2, 0, Math.PI * 2);
-        ctx.fill();
-        break;
+        case 'oval':
+          ctx.beginPath();
+          ctx.ellipse(centerX, centerY, this.width / 2, this.height / 2, 0, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+
+        case 'circle':
+        default:
+          ctx.beginPath();
+          ctx.arc(centerX, centerY, this.width / 2, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+      }
+
+      // Eyes
+      ctx.fillStyle = '#ffffff';
+      const eyeOffsetX = (this.facing || 1) > 0 ? 5 : -5;
+      ctx.beginPath();
+      ctx.arc(centerX + eyeOffsetX, this.y + this.height / 3, 2.5, 0, Math.PI * 2);
+      ctx.fill();
     }
-
-    // Eyes
-    ctx.fillStyle = '#ffffff';
-    const eyeOffsetX = (this.facing || 1) > 0 ? 5 : -5;
-    ctx.beginPath();
-    ctx.arc(centerX + eyeOffsetX, this.y + this.height / 3, 2.5, 0, Math.PI * 2);
-    ctx.fill();
 
     // Health Bar if damaged
     if (this.hp < this.maxHp) {

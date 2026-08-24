@@ -1,6 +1,7 @@
 export class AbilitySystem {
   constructor() {
     this.abilities = {
+      sprint: this.applySprint.bind(this),
       wall_climb: this.applyWallClimb.bind(this),
       swim: this.applySwim.bind(this),
       dig: this.applyDig.bind(this)
@@ -8,11 +9,12 @@ export class AbilitySystem {
     this.digCooldown = 0;
   }
 
-  update(player, input, physics, levelManager, inventory, dt) {
+  update(player, input, physics, levelManager, inventory, dt, particleSystem = null) {
     if (!player || !inventory || !levelManager) return;
 
     player.isWallClimbing = false;
     player.isSwimming = false;
+    player.speed = player.baseSpeed;
 
     if (this.digCooldown > 0) {
       this.digCooldown = Math.max(0, this.digCooldown - dt);
@@ -21,8 +23,15 @@ export class AbilitySystem {
     for (const abilityId of inventory.equipped) {
       const handler = this.abilities[abilityId];
       if (handler) {
-        handler(player, input, physics, levelManager, dt);
+        handler(player, input, physics, levelManager, dt, particleSystem);
       }
+    }
+  }
+
+  applySprint(player, input, physics, levelManager, dt) {
+    player.speed = player.sprintSpeed;
+    if (player.ax !== 0 && !player.isSwimming && !player.isWallClimbing) {
+      player.vx = player.facing * player.speed;
     }
   }
 
@@ -95,7 +104,7 @@ export class AbilitySystem {
     }
   }
 
-  applyDig(player, input, physics, levelManager, dt) {
+  applyDig(player, input, physics, levelManager, dt, particleSystem) {
     if (!input.isActionHeld() || this.digCooldown > 0) return;
 
     let targetX = player.x + player.width / 2;
@@ -118,7 +127,10 @@ export class AbilitySystem {
     const dug = levelManager.setTileAtWorldPos(targetX, targetY, 0);
     if (dug) {
       this.digCooldown = 0.15;
-      player.createDust(8);
+      if (particleSystem) {
+        const isSurface = levelManager.currentBiome === 'surface';
+        particleSystem.createDigPuff(targetX, targetY, isSurface);
+      }
     }
   }
 }

@@ -35,5 +35,7 @@ export const EnemyRegistry = {
 EnemyRegistry["crawler"] = EnemyRegistry["walker"];
 EnemyRegistry["spitter"] = EnemyRegistry["aggro_walker"];
 EnemyRegistry["flyer"] = EnemyRegistry["flier"];
+EnemyRegistry["aggressive_red_slime"] = EnemyRegistry["aggro_walker"];
+EnemyRegistry["red_slime"] = EnemyRegistry["aggro_walker"];
 
 export const ENEMY_TYPES = EnemyRegistry;

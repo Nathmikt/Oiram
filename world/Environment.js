@@ -161,7 +161,7 @@ export class Environment {
     }
   }
 
-  draw(ctx, camera) {
+  draw(ctx, camera, textureManager) {
     if (!this.levelManager || !this.levelManager.activeChunks) return;
 
     const camX = Number.isFinite(camera.x) ? camera.x : 0;
@@ -173,11 +173,18 @@ export class Environment {
 
     // Mandatory Fix 1: Camera-Based Skybox Interpolation (Alpha Overlay Trick)
     // Step A: Surface Twilight Skybox Base Layer
-    const skyGrad = ctx.createLinearGradient(0, camY, 0, camY + camH);
-    skyGrad.addColorStop(0, '#0f172a');
-    skyGrad.addColorStop(1, '#1e293b');
-    ctx.fillStyle = skyGrad;
-    ctx.fillRect(camX, camY, camW, camH);
+    const biome = this.levelManager.currentBiome || 'surface';
+    const skyImg = (biome === 'surface' && textureManager) ? (textureManager.get('sky_evening') || textureManager.get('sky_night')) : null;
+
+    if (skyImg) {
+      ctx.drawImage(skyImg, camX, camY, camW, camH);
+    } else {
+      const skyGrad = ctx.createLinearGradient(0, camY, 0, camY + camH);
+      skyGrad.addColorStop(0, '#0f172a');
+      skyGrad.addColorStop(1, '#1e293b');
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(camX, camY, camW, camH);
+    }
 
     // Surface Clouds: Alpha fades as camera pans underground
     const cloudAlpha = Math.max(0, Math.min(1, 1 - (camY / 500)));
@@ -218,6 +225,8 @@ export class Environment {
       const cW = this.levelManager.chunkWidth;
       const cH = this.levelManager.chunkHeight;
 
+      const tileset = textureManager ? textureManager.get('tileset') : null;
+
       for (let r = 0; r < cH; r++) {
         for (let c = 0; c < cW; c++) {
           const index = r * cW + c;
@@ -227,31 +236,79 @@ export class Environment {
           const tileX = chunkOffsetX + c * tileSize;
           const tileY = chunkOffsetY + r * tileSize;
 
-          if (tileType === 1) {
-            ctx.fillStyle = chunk.data.biome === 'surface' ? '#22303c' : '#141824';
-            ctx.fillRect(tileX, tileY, tileSize, tileSize);
+          if (tileset) {
+            if (tileType === 1) { // Solid Block
+              const isSurface = chunk.data.biome === 'surface';
 
-            const topTile = (r > 0) ? tiles[(r - 1) * cW + c] : 0;
-            if (topTile === 0) {
-              ctx.fillStyle = chunk.data.biome === 'surface' ? '#3a6659' : '#2a3b59';
-              ctx.fillRect(tileX, tileY, tileSize, 4);
+              const tileU = this.levelManager.getTileAtWorldPos(tileX, tileY - tileSize);
+              const tileD = this.levelManager.getTileAtWorldPos(tileX, tileY + tileSize);
+              const tileL = this.levelManager.getTileAtWorldPos(tileX - tileSize, tileY);
+              const tileR = this.levelManager.getTileAtWorldPos(tileX + tileSize, tileY);
+
+              const airU = (tileU === 0 || tileU === null);
+              const airD = (tileD === 0 || tileD === null);
+              const airL = (tileL === 0 || tileL === null);
+              const airR = (tileR === 0 || tileR === null);
+
+              let col = 1; // Default Center
+              let row = 1; // Default Center
+
+              // Evaluate X-Axis (Columns 0, 1, 2)
+              if (airL && !airR) col = 0;
+              else if (!airL && airR) col = 2;
+
+              // Evaluate Y-Axis (Rows 0, 1, 2)
+              if (airU && !airD) row = 0;
+              else if (!airU && airD) row = 2;
+
+              let sx = col * 32;
+              let sy = (isSurface ? 0 : 96) + (row * 32);
+
+              // Apply Deterministic Variation for Center Fill Tiles ONLY
+              if (col === 1 && row === 1) {
+                const seed = Math.abs(Math.sin(tileX * 12.9898 + tileY * 78.233)) * 43758.5453;
+                const variation = Math.floor((seed - Math.floor(seed)) * 4); 
+
+                if (variation > 0) {
+                  // Map variations 1, 2, 3 to Columns 3, 4, 5 (96px, 128px, 160px)
+                  sx = (2 + variation) * 32; 
+                }
+              }
+
+              ctx.drawImage(tileset, sx, sy, 32, 32, tileX, tileY, tileSize, tileSize);
+            } else if (tileType === 2) { // Platform
+              ctx.drawImage(tileset, 96, 0, 32, 32, tileX, tileY, tileSize, tileSize);
+            } else if (tileType === 4) { // Hazard/Spike
+              ctx.drawImage(tileset, 128, 0, 32, 32, tileX, tileY, tileSize, tileSize);
             }
+          } else {
+            // FALLBACK: Vector drawing
+            if (tileType === 1) {
+              ctx.fillStyle = chunk.data.biome === 'surface' ? '#22303c' : '#141824';
+              ctx.fillRect(tileX, tileY, tileSize, tileSize);
 
-            ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(tileX, tileY, tileSize, tileSize);
-          } else if (tileType === 2) {
-            ctx.fillStyle = '#475569';
-            ctx.fillRect(tileX, tileY, tileSize, 8);
-            ctx.fillStyle = '#94a3b8';
-            ctx.fillRect(tileX, tileY, tileSize, 2);
-          } else if (tileType === 4) {
-            ctx.fillStyle = '#ef4444';
-            ctx.beginPath();
-            ctx.moveTo(tileX, tileY + tileSize);
-            ctx.lineTo(tileX + tileSize / 2, tileY);
-            ctx.lineTo(tileX + tileSize, tileY + tileSize);
-            ctx.fill();
+              const topTile = (r > 0) ? tiles[(r - 1) * cW + c] : 0;
+              if (topTile === 0) {
+                ctx.fillStyle = chunk.data.biome === 'surface' ? '#3a6659' : '#2a3b59';
+                ctx.fillRect(tileX, tileY, tileSize, 4);
+              }
+
+              ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(tileX, tileY, tileSize, tileSize);
+            } else if (tileType === 2) {
+              ctx.fillStyle = '#475569';
+              ctx.fillRect(tileX, tileY, tileSize, 8);
+              ctx.fillStyle = '#94a3b8';
+              ctx.fillRect(tileX, tileY, tileSize, 2);
+            } else if (tileType === 4) {
+              ctx.fillStyle = '#ef4444';
+              ctx.beginPath();
+              ctx.moveTo(tileX, tileY + tileSize);
+              ctx.lineTo(tileX + tileSize / 2, tileY);
+              ctx.lineTo(tileX + tileSize, tileY + tileSize);
+              ctx.fill();
+            }
           }
         }
       }

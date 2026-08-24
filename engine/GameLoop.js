@@ -2,15 +2,18 @@ import { Input } from './Input.js';
 import { Camera } from './Camera.js';
 import { Physics } from './Physics.js';
 import { Renderer } from './Renderer.js';
+import { TextureManager } from './TextureManager.js';
 import { Player } from '../entities/Player.js';
 import { LevelManager } from '../world/LevelManager.js';
 import { Environment } from '../world/Environment.js';
 import { Inventory } from '../systems/Inventory.js';
 import { AbilitySystem } from '../systems/AbilitySystem.js';
 import { Health } from '../systems/Health.js';
+import { ParticleSystem } from '../systems/ParticleSystem.js';
 
 export class GameLoop {
   constructor() {
+    this.textureManager = new TextureManager();
     this.canvas = document.getElementById('game');
     this.renderer = new Renderer(this.canvas);
     this.input = new Input();
@@ -18,11 +21,20 @@ export class GameLoop {
     this.physics = new Physics();
     this.player = new Player(200, 200);
 
-    this.levelManager = new LevelManager(12345);
+    // Seed Resolution: Check URL query parameter '?seed=XYZ', otherwise generate random seed
+    const urlParams = new URLSearchParams(window.location.search);
+    const seedParam = urlParams.get('seed');
+    const seed = (seedParam !== null && !isNaN(parseInt(seedParam, 10)))
+      ? parseInt(seedParam, 10)
+      : Math.floor(Math.random() * 1000000000);
+
+    this.seed = seed;
+    this.levelManager = new LevelManager(this.seed);
     this.environment = new Environment(this.levelManager);
 
     this.inventory = new Inventory();
     this.abilitySystem = new AbilitySystem();
+    this.particleSystem = new ParticleSystem();
     
     this.health = new Health(100, () => {
       this.player.resetToSpawn();
@@ -42,7 +54,39 @@ export class GameLoop {
   }
 
   async init() {
+    this.textureManager.load('player', 'assets/player/player_idle.png');
+    this.textureManager.load('player_idle', 'assets/player/player_idle.png');
+    this.textureManager.load('player_left_1', 'assets/player/player_left_1.png');
+    this.textureManager.load('player_left_2', 'assets/player/player_left_2.png');
+    this.textureManager.load('player_right_1', 'assets/player/player_right_1.png');
+    this.textureManager.load('player_right_2', 'assets/player/player_right_2.png');
+    this.textureManager.load('player_left_jump', 'assets/player/player_left_jump.png');
+    this.textureManager.load('player_right_jump', 'assets/player/player_right_jump.png');
+    this.textureManager.load('player_left_swim', 'assets/player/player_left_swim.png');
+    this.textureManager.load('player_right_swim', 'assets/player/player_right_swim.png');
+    this.textureManager.load('player_left_wall_hang', 'assets/player/player_left_wall_hang.png');
+    this.textureManager.load('player_right_wall_hang', 'assets/player/player_right_wall_hang.png');
+    this.textureManager.load('player_swim_down', 'assets/player/player_swim_down.png');
+
+    this.textureManager.load('sky_evening', 'assets/sky/Sky_Evening2.png');
+    this.textureManager.load('sky_night', 'assets/sky/Sky_Night.png');
+
+    this.textureManager.load('swimmer_idle', 'assets/enemies/water/water_enemy_idle.png');
+    this.textureManager.load('swimmer_swim_left1', 'assets/enemies/water/water_enemy_swim_left.png');
+    this.textureManager.load('swimmer_swim_left2', 'assets/enemies/water/water_enemy_swim_left2.png');
+    this.textureManager.load('swimmer_swim_right1', 'assets/enemies/water/water_enemy_swim_right.png');
+    this.textureManager.load('swimmer_swim_right2', 'assets/enemies/water/water_enemy_swim_right2.png');
+
+    this.textureManager.load('aggro_red_slime_idle', 'assets/enemies/ground/aggressive/aggressive_red_slime_idle.png');
+    this.textureManager.load('aggro_red_slime_walk_left1', 'assets/enemies/ground/aggressive/aggressive_red_walk_left.png');
+    this.textureManager.load('aggro_red_slime_walk_left2', 'assets/enemies/ground/aggressive/aggressive_red_walk_left2.png');
+    this.textureManager.load('aggro_red_slime_walk_right1', 'assets/enemies/ground/aggressive/aggressive_red_walk_right.png');
+    this.textureManager.load('aggro_red_slime_walk_right2', 'assets/enemies/ground/aggressive/aggressive_red_walk_right2.png');
+    this.textureManager.load('tileset', 'assets/tiles/tileset.png');
+    await this.textureManager.ready();
+    await this.inventory.init();
     await this.levelManager.loadWorldData();
+    console.log(`[World] Seed loaded: ${this.seed}`);
     this.start();
   }
 
@@ -59,9 +103,10 @@ export class GameLoop {
     this.lastTime = currentTime;
 
     // Hotkey listening for inventory equipment
-    if (this.input.wasPressed('Digit1')) this.inventory.toggle('wall_climb');
-    if (this.input.wasPressed('Digit2')) this.inventory.toggle('swim');
-    if (this.input.wasPressed('Digit3')) this.inventory.toggle('dig');
+    if (this.input.wasPressed('Digit1')) this.inventory.toggle('sprint');
+    if (this.input.wasPressed('Digit2')) this.inventory.toggle('wall_climb');
+    if (this.input.wasPressed('Digit3')) this.inventory.toggle('swim');
+    if (this.input.wasPressed('Digit4')) this.inventory.toggle('dig');
 
     // Variable jump height control
     const isJumpHeld = this.input.isDown('Space') || this.input.isDown('ArrowUp') || this.input.isDown('KeyW');
@@ -157,12 +202,14 @@ export class GameLoop {
       this.physics,
       this.levelManager,
       this.inventory,
-      dt
+      dt,
+      this.particleSystem
     );
 
     this.physics.applyPhysics(this.player, dt, this.levelManager);
     this.player.update(dt);
     this.health.update(dt);
+    this.particleSystem.update(dt);
     this.player.invulnerable = this.health.invulnerableTimer > 0;
 
     this.camera.update();
@@ -174,7 +221,9 @@ export class GameLoop {
       this.levelManager,
       this.player,
       this.levelManager.activeEnemies,
-      this.health
+      this.health,
+      this.textureManager,
+      this.particleSystem
     );
 
     this.input.clear();

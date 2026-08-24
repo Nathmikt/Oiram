@@ -23,7 +23,7 @@ export class Renderer {
     }
   }
 
-  render(camera, environment, levelManager, player, enemies, health) {
+  render(camera, environment, levelManager, player, enemies, health, textureManager, particleSystem) {
     if (!this.ctx) return;
     const ctx = this.ctx;
 
@@ -41,19 +41,24 @@ export class Renderer {
     ctx.translate(-Math.floor(camX), -Math.floor(camY));
 
     // 1. Draw World & Environment (Backgrounds, Solids, Platforms, Water)
-    if (environment) environment.draw(ctx, camera);
+    if (environment) environment.draw(ctx, camera, textureManager);
 
     // 2. Draw Entities (Enemies & Player)
     if (Array.isArray(enemies)) {
       for (const enemy of enemies) {
         if (enemy && typeof enemy.draw === 'function') {
-          enemy.draw(ctx);
+          enemy.draw(ctx, textureManager);
         }
       }
     }
 
     if (player && typeof player.draw === 'function') {
-      player.draw(ctx);
+      player.draw(ctx, textureManager);
+    }
+
+    // 2b. Draw World Particles
+    if (particleSystem) {
+      particleSystem.draw(ctx);
     }
 
     // 3. Dynamic Depth Darkness Overlay via Offscreen Destination-Out Light Mask

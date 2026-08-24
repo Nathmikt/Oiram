@@ -15,6 +15,7 @@ export class LevelManager {
     this.activeChunks = new Map();
     this.chunkModifications = new Map();
     this.massModifications = new Map();
+    this.defeatedEnemies = new Set();
     this.activeEnemies = [];
     this.currentChunkKey = '0,0';
     this.currentBiome = 'surface';
@@ -71,8 +72,14 @@ export class LevelManager {
 
           const enemies = [];
           if (chunkData.entities) {
-            for (const spawner of chunkData.entities) {
+            for (let i = 0; i < chunkData.entities.length; i++) {
+              const spawner = chunkData.entities[i];
+              const spawnId = `${key}:${i}`;
+              if (this.defeatedEnemies.has(spawnId)) {
+                continue;
+              }
               const enemy = new Enemy(chunkOffsetX + spawner.x, chunkOffsetY + spawner.y, spawner.type);
+              enemy.spawnId = spawnId;
               enemies.push(enemy);
             }
           }
@@ -87,8 +94,15 @@ export class LevelManager {
       }
     }
 
-    for (const key of this.activeChunks.keys()) {
+    for (const [key, chunk] of this.activeChunks.entries()) {
       if (!newActiveKeys.has(key)) {
+        if (chunk.enemies) {
+          for (const e of chunk.enemies) {
+            if (e.isDead && e.spawnId) {
+              this.defeatedEnemies.add(e.spawnId);
+            }
+          }
+        }
         this.activeChunks.delete(key);
       }
     }
@@ -102,6 +116,11 @@ export class LevelManager {
   removeDeadEnemies() {
     for (const chunk of this.activeChunks.values()) {
       if (chunk.enemies) {
+        for (const e of chunk.enemies) {
+          if (e.isDead && e.spawnId) {
+            this.defeatedEnemies.add(e.spawnId);
+          }
+        }
         chunk.enemies = chunk.enemies.filter(e => !e.isDead || (e.particles && e.particles.length > 0));
       }
     }

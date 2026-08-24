@@ -62,23 +62,59 @@ export class Physics {
       }
     }
 
-    // 1. Integrate Y position FIRST
+    // 1. Integrate X position FIRST with vertical inset (prevents floor/ceiling corner interference)
+    if (entity.vx !== 0) {
+      entity.x += entity.vx * dt;
+
+      if (levelManager) {
+        const topInset = 3;
+        const bottomInset = 3;
+        const probeY = entity.y + topInset;
+        const probeHeight = Math.max(1, entity.height - (topInset + bottomInset));
+
+        const xTiles = levelManager.getSolidTilesInRect(
+          entity.x,
+          probeY,
+          entity.width,
+          probeHeight
+        );
+
+        for (const tile of xTiles) {
+          if (tile.type === 2) continue; // One-way platforms only collide vertically
+
+          if (entity.vx > 0) {
+            entity.x = tile.x - entity.width;
+            entity.vx = 0;
+          } else if (entity.vx < 0) {
+            entity.x = tile.x + tile.width;
+            entity.vx = 0;
+          }
+        }
+      }
+    }
+
+    // 2. Integrate Y position SECOND with horizontal inset (prevents side wall corner interference)
     const wasGrounded = entity.isGrounded;
+    const prevY = entity.y;
     entity.y += entity.vy * dt;
     entity.isGrounded = false;
 
-    // 2. Resolve Vertical Collisions Unconditionally FIRST
     if (levelManager) {
+      const sideInset = 3;
+      const probeX = entity.x + sideInset;
+      const probeWidth = Math.max(1, entity.width - (sideInset * 2));
+
       const yTiles = levelManager.getSolidTilesInRect(
-        entity.x + 2,
+        probeX,
         entity.y,
-        entity.width - 4,
+        probeWidth,
         entity.height
       );
 
       for (const tile of yTiles) {
         if (tile.type === 2) {
-          if (entity.vy > 0) {
+          const prevBottom = prevY + entity.height;
+          if (entity.vy > 0 && prevBottom <= tile.y + 1) {
             entity.y = tile.y - entity.height;
             entity.vy = 0;
             entity.isGrounded = true;
@@ -93,54 +129,12 @@ export class Physics {
           entity.y = tile.y - entity.height;
           entity.vy = 0;
           entity.isGrounded = true;
-
           if (!wasGrounded && typeof entity.onLand === 'function') {
             entity.onLand();
           }
         } else if (entity.vy < 0) {
           entity.y = tile.y + tile.height;
           entity.vy = 0;
-        } else {
-          // vy === 0: Resolve embedding based on vertical overlap center
-          const entityCenterY = entity.y + entity.height / 2;
-          const tileCenterY = tile.y + tile.height / 2;
-
-          if (entityCenterY < tileCenterY) {
-            entity.y = tile.y - entity.height;
-            entity.isGrounded = true;
-          } else {
-            entity.y = tile.y + tile.height;
-          }
-          entity.vy = 0;
-        }
-      }
-    }
-
-    // 3. Integrate X position AFTER Y ejection is complete
-    entity.x += entity.vx * dt;
-
-    if (levelManager) {
-      const topInset = entity.inWater ? 6 : 2;
-      const bottomInset = entity.inWater ? 6 : 2;
-      const probeY = entity.y + topInset;
-      const probeHeight = Math.max(1, entity.height - (topInset + bottomInset));
-
-      const xTiles = levelManager.getSolidTilesInRect(
-        entity.x,
-        probeY,
-        entity.width,
-        probeHeight
-      );
-
-      for (const tile of xTiles) {
-        if (tile.type === 2) continue;
-
-        if (entity.vx > 0) {
-          entity.x = tile.x - entity.width;
-          entity.vx = 0;
-        } else if (entity.vx < 0) {
-          entity.x = tile.x + tile.width;
-          entity.vx = 0;
         }
       }
     }
